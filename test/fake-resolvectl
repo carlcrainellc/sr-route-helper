@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""A stand-in for `resolvectl`, for netns-test.sh on machines without systemd-resolved.
+
+Keeps per-link DNS servers, routing domains and the DNS default route in the JSON file
+named by $FAKE_RESOLVED, prints them the way resolvectl does, and logs every call to
+$FAKE_RESOLVED.log. Links are the interfaces in /sys/class/net, as for the real thing.
+It does not resolve anything: it checks what the helper asks resolved to do.
+"""
+import json, os, sys
+
+path = os.environ["FAKE_RESOLVED"]
+with open(path + ".log", "a") as f:
+    f.write(" ".join(sys.argv[1:]) + "\n")
+try:
+    st = json.load(open(path))
+except Exception:
+    st = {}
+
+
+def links():
+    out = []
+    for n in sorted(os.listdir("/sys/class/net")):
+        if n == "lo":
+            continue
+        idx = int(open(f"/sys/class/net/{n}/ifindex").read())
+        out.append((idx, n))
+    return sorted(out)
+
+
+def get(n):
+    return st.setdefault(n, {"dns": [], "domain": [], "default-route": False})
+
+
+args = sys.argv[1:]
+if not args:
+    sys.exit(0)
+cmd, rest = args[0], args[1:]
+if cmd == "status":
+    print("Global\n  resolv.conf mode: stub")
+    sys.exit(0)
+if cmd not in ("dns", "domain", "default-route"):
+    print(f"unknown command {cmd}", file=sys.stderr)
+    sys.exit(1)
+names = {n for _, n in links()}
+if rest and rest[0] not in names:
+    print(f"Failed to resolve interface \"{rest[0]}\": No such device", file=sys.stderr)
+    sys.exit(1)
+if len(rest) >= 2:
+    vals = [v for v in rest[1:] if v != ""]
+    if cmd == "default-route":
+        get(rest[0])[cmd] = vals[0] in ("yes", "true", "1")
+    else:
+        get(rest[0])[cmd] = vals
+    json.dump(st, open(path, "w"))
+    sys.exit(0)
+if cmd == "dns":
+    print("Global:")
+for idx, n in links():
+    if rest and n != rest[0]:
+        continue
+    v = get(n)[cmd]
+    if cmd == "default-route":
+        v = ["yes" if v else "no"]
+    print(f"Link {idx} ({n}): {' '.join(v)}".rstrip())

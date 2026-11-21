@@ -1,0 +1,49 @@
+# Example unit: runs the helper alongside the router. The router needs
+# [network] auto-routing=false while the helper runs.
+#
+# Stopping or restarting session-router on purpose stops this too (PartOf), and a clean
+# stop puts routes and DNS back. If the router crashes, the helper keeps running and holds
+# exit traffic blocked until the router is back (it fails closed). There is no restore in
+# ExecStopPost on purpose: a helper that crashes is restarted and carries on from its
+# journal instead of opening the network. `sr-route-helper restore` undoes everything by hand.
+[Unit]
+Description=Session Router route helper (exit routes and DNS)
+After=session-router.service
+PartOf=session-router.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sr-route-helper run
+Restart=on-failure
+RestartSec=1
+# Root, but only allowed to change network settings. resolvectl (systemd-resolved over
+# D-Bus) works as root; /etc/resolv.conf is written as its owner, so no DAC override.
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+NoNewPrivileges=yes
+# /usr and /boot read-only. Not "full"/"strict": the resolv.conf fallback writes
+# /etc/resolv.conf (or the /run file it links to).
+ProtectSystem=yes
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# Netlink for routes, Unix for the router's rpc.sock and D-Bus, inet for its TCP RPC.
+RestrictAddressFamilies=AF_NETLINK AF_UNIX AF_INET AF_INET6
+# Its own directory: the router's data directory keeps its owner.
+StateDirectory=sr-route-helper
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=session-router.service
